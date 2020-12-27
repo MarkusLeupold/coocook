@@ -1,15 +1,43 @@
 
-[% escape_title( 'Recipe', recipe.name ) %]
+[% # escape_title( 'Recipe', recipe.name ) %]
 
 [% IF import_url %]
-<div class="row">
-    <div class="offset-sm-2 col-sm-5 text-left pb-5">
-        <form method="get" action="[% import_url %]" class="inline pl-3">
-            <button type="submit" class="btn btn-secondary"  data-toggle="tooltip" title="Import this recipe into another one of your projects">
-                <i class="material-icons ">import_export</i> Import into another project
-            </button>
-        </form>
-    </div>
+<div class="row pb-5">
+	<div class="col-sm-6">
+		<h2>Recipe <em>[% recipe.name %]</em></h2>
+		
+	</div>
+    <div class="offset-sm-1 col-sm-5 text-left">
+		
+		<div class="d-flex justify-content-end bd-highlight mb-3">
+			<div class="p-0">
+				<button type="button" class="btn btn-primary [% dishes.size > 0 ? '' : 'disabled' %]" data-toggle="collapse" data-target="#collapseExample1" aria-expanded="false" aria-controls="collapseExample">
+					Where <em>[% recipe.name %]</em> is used <span class="badge badge-light"> [% dishes.size %]</span>
+				</button>
+			</div>
+			
+			<div class="p-0">
+				<form method="get" action="[% import_url %]" class="inline pl-3">
+					<button type="submit" class="btn btn-secondary"  data-toggle="tooltip" title="Import this recipe into another one of your projects">
+						<i class="material-icons ">import_export</i> Import into another project
+					</button>
+				</form>				
+			</div>
+		</div>
+	
+	
+		<div class="collapse" id="collapseExample1">
+			<div class="card">
+				<ul class="list-group">
+					[% FOR dish IN dishes %]
+						<li class="list-group-item">[% loop.count %]. dish <a href="[% dish.url %]">[% dish.name | html %]</a> for meal <em>[% dish.meal | html %]</em> on [% display_date(dish.date, {html=>1}) %]</li>
+					[% END %]
+				</ul>
+			</div>
+		</div>
+		
+	</div>
+
 </div>
 [% END %]
 
@@ -70,11 +98,3 @@
 </form>
 
 [% INCLUDE 'includes/forms/ingredients_add.tt' %]
-
-<h2>Where <em>[% recipe.name | html %]</em> is used</h2>
-
-<ul>
-[% FOR dish IN dishes %]
-    <li>dish <a href="[% dish.url %]">[% dish.name | html %]</a> for meal <em>[% dish.meal | html %]</em> on [% display_date(dish.date, {html=>1}) %]</li>
-[% END %]
-</ul>
