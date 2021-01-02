@@ -324,6 +324,32 @@ input[type=number].editable-content:not(:focus) {
     display: none;
 }
 
+
+
+/* unstyled list without a specific type */
+ul.list-style-type-none {
+	list-style-type:none;
+	padding-left: 0;
+}
+
+/* color of remove button */
+.btn-remove {
+  color: #fff;
+  background-color: #6c757d;
+  border-color: #6c757d;
+}
+.btn-remove:hover {
+  color: #fff;
+  background-color: #c82333;
+  border-color: #bd2130;
+}
+.btn-remove:focus, .btn-remove.focus {
+  color: #fff;
+  background-color: #c82333;
+  border-color: #bd2130;
+  box-shadow: 0 0 0 0.2rem rgba(225, 83, 97, 0.5);
+}
+
 /******** footer part ********/
 
 footer {
