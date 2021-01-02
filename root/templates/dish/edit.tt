@@ -13,7 +13,7 @@
 		<div class="d-flex justify-content-end">
 			<form method="post" action="[% delete_url %]">
 				<abbr title="Delete dish">
-					<button type="button" class="btn btn-danger" aria-expanded="false">
+					<button type="button" class="btn btn-sm btn-remove" aria-expanded="false">
 						<i class="material-icons">delete_forever</i>
 					</button>
 				</abbr>
