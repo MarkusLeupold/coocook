@@ -43,8 +43,21 @@
 							<input type="submit" class="hidden" value="submit" title="Submit new value for item">
 						</div>
 					</form>
-					[% '&nbsp' IF item.unit.space;
-					display_unit( item.unit, {html=>1} ) %]
+					[% #'&nbsp' IF item.unit.space;
+					#display_unit( item.unit, {html=>1} ) %]
+					
+					<div class="btn-group btn-group-sm" role="group" aria-label="Small button group">
+						<button type="button" class="btn btn-outline-secondary active">
+							[% '&nbsp' IF item.unit.space;
+							display_unit( item.unit, {html=>1} ) %]
+						</button>
+						[% FOREACH unit IN item.convertible_into;
+						IF item.convert_url %]
+						[% #  TODO: make sure, that the link is able to convert without a hidden input %]
+						<button type="button" class="btn btn-outline-secondary" onclick="window.location.href=[% item.convert_url %]">[% unit.short_name | html %]</button>
+						[% END;
+						END %]
+					</div>	
 				</td>
 				<td>
 				[% FOREACH unit IN item.convertible_into;
