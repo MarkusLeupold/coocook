@@ -16,112 +16,105 @@
 [% FOREACH section IN sections %]
 <div class="row pb-4">
 	<div class="col-sm-6">
-		<h3>[% section.name | html %]</h3>
+		<button type="button" class="btn btn-outline-success mb-3">
+			<h3>[% section.name | html %]</h3>
+		</button>
 	</div>
 	
-	<div class="col-sm-12">
+	<div class="col-sm-12 mt-1 mb-4">
 		<table class="table table-hover">
+			<col style="width:25%">
+			<col style="width:10%">
+			<col style="width:10%">
+			<col style="width:5%">
+			<col style="width:5%">
+			<col style="width:15%">
+			<col style="width:10%">
+			<col style="width:10%">
+			<col style="width:10%">
 			<thead>
 				<tr>
 					<th>Amount</th>
 					<th>Convert to &hellip;</th>
 					<th>Article</th>
-					<th>Dishes</th>
+					<th colspan="5">Dishes</th>
 					<th>Comment</th>
 				</tr>
 			</thead>
 			<tbody>
 			[% FOREACH item IN section.items %]
-			<tr>
-				<td>
-					<form name="total" class="inline" method="post" action="[% item.update_offset_url %]">
-						<div class="input-group mb-3">
-							[% IF item.offset %]
-							<label for="item_value">ca.</label>
-							[% END %]
-							<input type="number" min="0" step="any" class="editable-content form-control-table" id="total" name="total" value="[% item.value + item.offset %]">
-							<input type="submit" class="hidden" value="submit" title="Submit new value for item">
-						</div>
-					</form>
-					[% #'&nbsp' IF item.unit.space;
-					#display_unit( item.unit, {html=>1} ) %]
-					
-					<div class="btn-group btn-group-sm" role="group" aria-label="Small button group">
-						<button type="button" class="btn btn-outline-secondary active">
-							[% '&nbsp' IF item.unit.space;
-							display_unit( item.unit, {html=>1} ) %]
-						</button>
-						[% FOREACH unit IN item.convertible_into;
+				<tr>
+					[% rowspan = item.ingredients.size; IF item.offset;  rowspan=rowspan+1; END; %]
+					<td rowspan="[% rowspan %]">
+						<div class="d-flex justify-content-between">
+							<div class="p">
+								<form name="total" class="inline" method="post" action="[% item.update_offset_url %]">
+									<div class="input-group mb-3">
+										[% IF item.offset %]
+										<label for="item_value">ca.</label>
+										[% END %]
+										<input type="number" min="0" step="any" class="editable-content form-control-table w-50" id="total" name="total" value="[% item.value + item.offset %]">
+										<input type="submit" class="hidden" value="submit" title="Submit new value for item">
+									</div>
+								</form>
+								
+								<div class="btn-group btn-group-sm">
+									<button type="button" class="btn btn-outline-secondary active">
+										[% '&nbsp' IF item.unit.space;
+										display_unit( item.unit, {html=>1} ) %]
+									</button>
+									[% FOREACH unit IN item.convertible_into;
+										IF item.convert_url %]
+										[% #  TODO: make sure, that the link is able to convert without a hidden input %]
+									<button type="button" class="btn btn-outline-secondary" onclick="window.location.href=[% item.convert_url %]">[% unit.short_name | html %]</button>
+										[% END;
+									END %]
+									
+								</div>
+								
+							</div>
+							<div class="">
+								[% IF item.offset %]
+								<form name="remove-offset pr-2" class="inline" method="post" action="[% item.update_offset_url %]">
+									<abbr title="Remove">
+										<button type="button" class="btn btn-sm btn-remove mb-1" aria-expanded="false">
+											<i class="material-icons">delete_forever</i>
+										</button>
+									</abbr>
+								</form><br>
+								<small>[% display_value_unit( item.offset, ingredient.unit, {html=>1, force_sign=>1} ) %] – <em>rounding difference</em></small>
+								[% END %]
+							</div>
+						 </div>
+		
+						
+					</td>
+					<td rowspan="[% rowspan %]"> 
+					[% FOREACH unit IN item.convertible_into;
 						IF item.convert_url %]
-						[% #  TODO: make sure, that the link is able to convert without a hidden input %]
-						<button type="button" class="btn btn-outline-secondary" onclick="window.location.href=[% item.convert_url %]">[% unit.short_name | html %]</button>
+						<form class="inline" method="post" action="[% item.convert_url %]">
+							<input type="hidden" name="unit" value="[% unit.id %]" class="btnc btn-primary">
+							<button type="submit" class="btn bnt-sm btn-secondary">[% unit.short_name | html %]</button>
+						</form>
 						[% END;
-						END %]
-					</div>	
-				</td>
-				<td>
-				[% FOREACH unit IN item.convertible_into;
-					IF item.convert_url %]
-					<form class="inline" method="post" action="[% item.convert_url %]">
-						<input type="hidden" name="unit" value="[% unit.id %]" class="btnc btn-primary">
-						<button type="submit" class="btn bnt-sm btn-secondary">[% unit.short_name | html %]</button>
-					</form>
-					[% END;
-				END %]
-				</td>
-				<td>[% item.article.name | html %]</td>
-				<td class="small-font">
-					<table class="table-sm table-borderless">
-						<tbody>
-						[% FOREACH ingredient IN item.ingredients %]
-							<tr>
-								<td>
-									<form class="inline pr-2" method="post" action="[% ingredient.remove_url %]">
-										<abbr title="Remove">
-											<button type="button" class="btn btn-sm btn-remove mb-1" aria-expanded="false">
-												<i class="material-icons">delete_forever</i>
-											</button>
-										</abbr>
-									</form>
-								</td>
-								<td style="text-align:right;">[% display_value_unit( ingredient.value, ingredient.unit, {html=>1} ) %]</td>
-								<td>[% ingredient.dish.meal.date.strftime('%a, %F') %]</td>
-								<td>[% ingredient.dish.meal.name | html %]</td>
-								<td>[% ingredient.dish.name | html %]</td>
-								<td>[% IF ingredient.comment; '('; ingredient.comment | html; ')'; END %]</td>
-							</tr>
-						[% END %]
-						[% IF item.offset %]
-							<tr>
-								<td>
-									<form name="remove-offset pr-2" class="inline" method="post" action="[% item.update_offset_url %]">
-										<abbr title="Remove">
-											<button type="button" class="btn btn-sm btn-remove mb-1" aria-expanded="false">
-												<i class="material-icons">delete_forever</i>
-											</button>
-										</abbr>
-									</form>
-								</td>
-								<td colspan="5">
-									[% display_value_unit( item.offset, ingredient.unit, {html=>1, force_sign=>1} ) %] – <em>rounding difference</em>
-								</td>
-							</tr>
-						[% END %]
-						</tbody>
-					</table>
-				</td>
-				<td>[% item.comment %]</td>
-			<tr>
-			[% END %]
+					END %]
+					</td>
+					<td rowspan="[% rowspan %]">[% item.article.name | html %]</td>
+					
+					[% FOREACH ingredient IN item.ingredients %]
+						[% IF loop.index == 0 %]
+							[% INCLUDE purchase_list/snippet_dish.tt %]
+				</tr>
+						[% ELSE %]
+				<tr>
+							[% INCLUDE purchase_list/snippet_dish.tt %]
+				</tr>
+						[% END;
+					END;
+			END %]
 			</tbody>
 		</table>
-	
+		
 	</div>
 </div>
 [% END %]
-
-<style>
-table.purchase-items {
-    width: 100%; /* there are several tables with many columns and they should have identical width */
-}
-</style>

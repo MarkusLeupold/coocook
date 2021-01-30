@@ -1,0 +1,15 @@
+
+<td>
+	<form class="inline pr-2" method="post" action="[% ingredient.remove_url %]">
+		<abbr title="Remove">
+			<button type="button" class="btn btn-sm btn-remove mb-1" aria-expanded="false">
+				<i class="material-icons">delete_forever</i>
+			</button>
+		</abbr>
+	</form>
+</td>
+<td style="text-align:right;">[% display_value_unit( ingredient.value, ingredient.unit, {html=>1} ) %]</td>
+<td style="text-align:center;">[% ingredient.dish.meal.date.strftime('%a, %F') %]</td>
+<td>[% ingredient.dish.meal.name | html %]</td>
+<td>[% ingredient.dish.name | html %]</td>
+<td>[% IF ingredient.comment; '('; ingredient.comment | html; ')'; END %]</td>
