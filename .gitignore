@@ -12,6 +12,11 @@
 /MYMETA.yml
 /pm_to_blib
 
+# Docker setup, start and stop scripts directory (the Docker commands contain
+# user-specific absolute file paths, so they should not be contained in the
+# repo)
+/docker-control
+
 # distribution files
 /.build/
 /Coocook-*/
