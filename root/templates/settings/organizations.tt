@@ -1,5 +1,25 @@
 [% title = "My Organizations" %]
 
+[% IF organizations_users.size > 0 %]
+    <p>Before you can leave an organization you need to transfer organization ownership to another organization member.</p>
+
+    <ul>
+    [% FOR organization_user IN organizations_users;
+        organization = organization_user.organization %]
+        <li>
+            [% link_organization(organization_user.organization, organization_user.organization_url) %] ([% organization_user.role %])
+        [% IF organization_user.leave_url %]
+            <form class="inline" method="post" action="[% organization_user.leave_url %]">
+                <input type="submit" value="Leave organization">
+            </form>
+        [% END %]
+        </li>
+    [% END %]
+    </ul>
+[% ELSE %]
+    <p>You are not member of any organization yet.</p>
+[% END %]
+
 <div class="container-fluid">
 <form method="post" action="[% create_organization_url %]">
 <div class="card">
@@ -15,31 +35,4 @@
 </div>
 </div>
 </form>
-
-<div class="card">
-    <div class="card-header"><h3>Your Organizations</h3></div>
-
-<div class="card-body">
-[% IF organizations_users.size > 0 %]
-    <p>Before you can leave an organization you need to transfer organization ownership to another organization member.</p>
-
-    <ul>
-    [% FOR organization_user IN organizations_users;
-        organization = organization_user.organization %]
-        <li>
-            <a href="[% organization_user.organization_url %]">👥[% organization.name %]</a> [% organization.display_name | html %] ([% organization_user.role %])
-        [% IF organization_user.leave_url %]
-            <form class="inline" method="post" action="[% organization_user.leave_url %]">
-                <input type="submit" value="Leave organization">
-            </form>
-        [% END %]
-        </li>
-    [% END %]
-    </ul>
-[% ELSE %]
-    <p>None.</p>
-[% END %]
-</div>
-</div>
-
 </div>

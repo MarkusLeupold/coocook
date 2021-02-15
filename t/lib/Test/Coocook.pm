@@ -2,31 +2,31 @@ package Test::Coocook;
 
 use strict;
 use warnings;
-
 use open ':locale';    # respect encoding configured in terminal
+use utf8;
 
 our $DEBUG //= $ENV{TEST_COOCOOK_DEBUG};
 
 use Carp;
-use DBICx::TestDatabase;
 use Email::Sender::Simple;
-use FindBin;
 use HTML::Meta::Robots;
+use Regexp::Common 'URI';
 use Scope::Guard qw< guard >;
 use TestDB;
 use Test::Most;
 
 BEGIN {
-    # don't actually send any e-mails
+    # don't actually send any emails
     $ENV{EMAIL_SENDER_TRANSPORT} = 'Test';
 
     # point Catalyst to t/ to avoid reading local config files
-    $ENV{COOCOOK_CONFIG} = "$FindBin::Bin";
+    $ENV{COOCOOK_CONFIG} = 't/';
 }
 
 # don't spill STDERR with info messages when not in verbose mode
 our $DISABLE_LOG_LEVEL_INFO //= !$ENV{TEST_VERBOSE};
 
+use parent 'Test::Coocook::Base';
 use parent 'Test::WWW::Mechanize::Catalyst';
 
 =head1 CONSTRUCTOR
@@ -40,8 +40,10 @@ sub new {
       and croak "Can't use both arguments 'deploy' and 'schema'";
 
     my $config = delete $args{config};
-    my $deploy = delete $args{deploy} // 1;
     my $schema = delete $args{schema};
+
+    my $deploy    = delete $args{deploy}    // 1;
+    my $test_data = delete $args{test_data} // 1;
 
     my $self = $class->next::method(
         catalyst_app => 'Coocook',
@@ -53,10 +55,7 @@ sub new {
         $self->catalyst_app->log->disable('info');
     }
 
-    $schema //=
-      $deploy
-      ? TestDB->new()
-      : DBICx::TestDatabase->new('Coocook::Schema');
+    $schema //= TestDB->new( deploy => $deploy, test_data => $test_data );
 
     $self->catalyst_app->model('DB')->schema->storage( $schema->storage );
 
@@ -92,8 +91,31 @@ sub emails {
     return [ Email::Sender::Simple->default_transport->deliveries ];
 }
 
-sub clear_emails { Email::Sender::Simple->default_transport->clear_deliveries }
-sub shift_emails { Email::Sender::Simple->default_transport->shift_deliveries }
+sub clear_emails {
+    my $self = shift;
+    $self->{coocook_checked_email_count} = 0;
+    Email::Sender::Simple->default_transport->clear_deliveries;
+}
+
+sub shift_emails {
+    my $self = shift;
+    my $n    = shift || 1;
+    defined and $_ -= $n for $self->{coocook_checked_email_count};
+    Email::Sender::Simple->default_transport->shift_deliveries for 1 .. $n;
+}
+
+sub email_count_is {
+    my ( $self, $count, $name ) = @_;
+
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+    $self->{coocook_checked_email_count} = $count;
+
+    is(
+        Email::Sender::Simple->default_transport->deliveries => $count,
+        $name || sprintf( "%i emails stored", $count )
+    );
+}
 
 sub local_config_guard {
     my $self = shift;
@@ -105,10 +127,18 @@ sub local_config_guard {
     return guard { $self->reload_config($original_config) };
 }
 
+=head2 $t->reload_config(\%config)
+
+=head2 Test::Coocook->reload_config(\%config)
+
+When called as a class method acts globally on L<Coocook>.
+
+=cut
+
 sub reload_config {
     my $self = shift;
 
-    my $app = $self->catalyst_app;
+    my $app = ref $self ? $self->catalyst_app : 'Coocook';
 
     $app->setup_finished(0);
 
@@ -137,8 +167,8 @@ sub register_ok {
         $self->submit_form_ok( { with_fields => $field_values },
             "register account '$field_values->{username}'" );
 
-        $self->content_like(qr/e-mail/)
-          or note $self->content;
+        $self->text_like(qr/email/)
+          or note $self->text;
     };
 }
 
@@ -150,41 +180,56 @@ sub register_fails_like {
     subtest $name || "register fails like '$error_regex'" => sub {
         $self->follow_link_ok( { text => 'Sign up' } );
 
-        note "Register account '$$field_values{username}' ...";
-        $self->submit_form( with_fields => $field_values );
+        $self->submit_form_fails( { with_fields => $field_values },
+            "register account '$$field_values{username}' ..." );
 
-        $self->status_is(400) and $self->content_like($error_regex)
-          or note $self->content;
+        $self->text_like($error_regex)
+          or note $self->text;
     };
 }
 
-sub get_email_link_ok {
-    my ( $self, $url_regex, $name ) = @_;
+=head2 get_ok_email_link_like( qr/.../, "test name"? )
+
+=head2 get_ok_email_link_like( qr/.../, $expected_status, "test name" )
+
+Matches all URLs found in the email against the given regex
+and calls C<get_ok()> on that URL.
+
+=cut
+
+sub get_ok_email_link_like {
+    my $self            = shift;
+    my $regex           = shift;
+    my $name            = pop;
+    my $expected_status = pop;
 
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-    subtest $name || "GET link from first e-mail", sub {
-        my @urls = $self->email_like($url_regex);
+    subtest $name || "GET link from first email", sub {
+        my $body = $self->_get_email_body();
 
-        is scalar @urls => 1,
-          "found 1 URL"
-          or return;
+        my @urls;
 
-        my $verification_url = $urls[0];
+        while ( $body =~ m/$RE{URI}{HTTP}{ -scheme => 'https' }{-keep}/g ) {
+            my $url = $1;    # can't match in list context because RE has groups
 
-        $self->get_ok($verification_url);
+            $url =~ $regex
+              and push @urls, $url;
+        }
+
+        if ( not is( scalar @urls => 1, "found 1 URL matching $regex" ) ) {
+            note $body;
+            return;
+        }
+
+        if ($expected_status) {
+            $self->get( $urls[0] );
+            $self->status_is(400);
+        }
+        else {
+            $self->get_ok( $urls[0] );
+        }
     };
-}
-
-sub verify_email_ok {
-    my ( $self, $name ) = @_;
-
-    local $Test::Builder::Level = $Test::Builder::Level + 1;
-
-    $self->get_email_link_ok(
-        qr/http\S+verify\S+/,    # TODO regex is very simple and will break easily
-        $name || "verify e-mail address"
-    );
 }
 
 sub email_like   { shift->_email_un_like( 1, @_ ) }
@@ -193,34 +238,57 @@ sub email_unlike { shift->_email_un_like( 0, @_ ) }
 sub _email_un_like {
     my ( $self, $like, $regex, $name ) = @_;
 
-    local $Test::Builder::Level = $Test::Builder::Level + 1;
+    local $Test::Builder::Level = $Test::Builder::Level + 2;
 
-    $name ||= "first e-mail like $regex";
+    $name ||= "first email like $regex";
+
+    my $body = $self->_get_email_body;
+
+    if ( not defined $body ) {
+        fail $name;
+        return;
+    }
+
+    if ($like) {
+        my @matches = ( $body =~ m/$regex/g );
+
+        ok @matches >= 1, $name
+          or note $body;
+
+        return @matches;
+    }
+    else {
+        my $ok = unlike( $body => $regex, $name )
+          or note $body;
+
+        return $ok;
+    }
+}
+
+sub _get_email_body {
+    my $self = shift;
 
     my $emails = $self->emails;
 
     if ( @$emails == 0 ) {
-        fail $name;
-        diag "no e-mails stored";
+        carp "no emails stored";
         return;
     }
 
-    @$emails > 1
-      and carp "More than 1 e-mail stored";
+    my $checked = $self->{coocook_checked_email_count} || 1;
 
-    my $email = $emails->[0]->{email};    # use first e-mail
+    {
+        local $Carp::Internal{'Test::Coocook'} = 1;
+        local $Carp::Internal{'Test::Builder'} = 1;
+        local $Carp::Internal{'Test::More'}    = 1;
 
-    note $email->as_string;
-
-    my @matches = ( $email->get_body =~ m/$regex/g );
-
-    if ($like) {
-        ok @matches >= 1, $name;
-        return @matches;
+        @$emails > $checked
+          and carp "More than 1 email stored";
     }
-    else {
-        ok @matches == 0, $name;
-    }
+
+    my $email = $emails->[0]->{email};    # use first email
+
+    return $email->get_body;
 }
 
 sub is_logged_in {
@@ -228,8 +296,8 @@ sub is_logged_in {
 
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-    $self->content_contains( 'Settings', $name || "client is logged in" )
-      or note $self->content;
+    $self->text_contains( 'Settings', $name || "client is logged in" )
+      or note $self->text;
 }
 
 sub is_logged_out {
@@ -237,8 +305,8 @@ sub is_logged_out {
 
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-    $self->content_like( qr/Sign [Ii]n/, $name || "client is logged out" )
-      or note $self->content;
+    $self->text_like( qr/Sign [Ii]n/, $name || "client is logged out" )
+      or note $self->text;
 }
 
 sub login {
@@ -290,8 +358,8 @@ sub login_fails {
     subtest $name || "login with $username:$password fails", sub {
         $self->login( $username, $password );
 
-        ( $self->content_like(qr/fail/) and $self->content_like(qr/Sign in/) )
-          or note $self->content;
+        ( $self->text_like(qr/fail/) and $self->text_like(qr/Sign in/) )
+          or note $self->text;
     };
 }
 
@@ -301,18 +369,6 @@ sub logout_ok {
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
     $self->click_ok( 'logout', $name || "click logout button" );
-}
-
-sub change_password_ok {
-    my ( $self, $field_values, $name ) = @_;
-
-    local $Test::Builder::Level = $Test::Builder::Level + 1;
-
-    subtest $name || "change password", sub {
-        $self->follow_link_ok( { text => 'settings Settings' } );
-
-        $self->submit_form_ok( { with_fields => $field_values }, "submit change password form" );
-    };
 }
 
 sub change_display_name_ok {
@@ -340,9 +396,16 @@ sub request_recovery_link_ok {
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
     subtest $name || "request recovery link for $email", sub {
-        $self->follow_link_ok( { text => 'person Sign in' } );
+        my $logged_in = ( $self->text =~ m/settings Settings/ );
 
-        $self->follow_link_ok( { text => 'Lost your password?' } );
+        if ($logged_in) {
+            $self->follow_link_ok( { text => 'settings Settings' } );
+            $self->follow_link_ok( { text => 'request a recovery link' } );
+        }
+        else {
+            $self->follow_link_ok( { text => 'person Sign in' } );
+            $self->follow_link_ok( { text => 'Lost your password?' } );
+        }
 
         $self->submit_form_ok(
             {
@@ -350,45 +413,13 @@ sub request_recovery_link_ok {
                     email => $email,
                 },
             },
-            "submit e-mail recovery form"
+            "submit email recovery form"
         );
 
-        $self->content_contains('Recovery link sent')
-          or note $self->content;
-    };
-}
+        $self->text_contains('Recovery link sent')
+          or note $self->text;
 
-sub reset_password_ok {
-    my ( $self, $password, $name ) = @_;
-
-    local $Test::Builder::Level = $Test::Builder::Level + 1;
-
-    subtest $name || "reset password to '$password'", sub {
-        $self->get_email_link_ok(
-            qr/http\S+reset_password\S+/,    # TODO regex is very simple and will break easily
-            $name || "click e-mail recovery link"
-        );
-
-        $self->submit_form_ok(
-            {
-                with_fields => {
-                    password  => $password,
-                    password2 => $password,
-                },
-            },
-            "submit password reset form"
-        );
-    };
-}
-
-sub recover_account_ok {
-    my ( $self, $email, $password, $name ) = @_;
-
-    local $Test::Builder::Level = $Test::Builder::Level + 1;
-
-    subtest $name || "reset password for $email to '$password'", sub {
-        $self->request_recovery_link_ok($email);
-        $self->reset_password_ok($password);
+        $self->get_ok_email_link_like( qr/reset_password/, $name || "click email recovery link" );
     };
 }
 
@@ -402,9 +433,48 @@ sub create_project_ok {
 
         $self->submit_form_ok( { with_fields => $fields }, "submit create project form" );
 
-        $self->content_contains( $fields->{name} )
-          or note $self->content;
+        $self->text_contains( $fields->{name} )
+          or note $self->text;
     };
+}
+
+sub checkbox_is_on  { shift->_checkbox_is_on_off( 1, @_ ) }
+sub checkbox_is_off { shift->_checkbox_is_on_off( 0, @_ ) }
+
+sub _checkbox_is_on_off {
+    my ( $self, $expected, $input, $name ) = @_;
+
+    local $Test::Builder::Level = $Test::Builder::Level + 2;
+
+    my $value = $self->value($input);
+
+    if ($expected) {
+        is $value => 'on', $name || "checkbox '$input' is checked";
+    }
+    else {
+        is $value => undef, $name || "checkbox '$input' is not checked";
+    }
+}
+
+=head2 input_has_value($input, $value, $test_name?)
+
+Finds input element with name C<$input> globally on the page (name must be unique)
+and compares value to the expected C<$value>.
+
+=cut
+
+sub input_has_value {
+    my ( $self, $input, $value, $name ) = @_;
+
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+    my @inputs = $self->find_all_inputs( name => $input );
+
+    @inputs == 1
+      or croak "More than 1 input element";
+
+    is( $inputs[0]->value => $value, $name || "Input with name '$input' has value '$value'" )
+      or note $self->content;
 }
 
 sub redirect_is {
@@ -422,6 +492,14 @@ sub redirect_is {
 
         $self->max_redirect($original_max_redirect);
     };
+}
+
+sub reload_ok {
+    my $self = shift;
+
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+    ok $self->reload(), "reload " . $self->base;
 }
 
 sub robots_flags_ok {
@@ -487,6 +565,24 @@ sub status_like {
 
     like $self->response->code => $expected,
       $name || "Response has status code like '$expected'";
+}
+
+sub submit_form_fails {
+    my ( $self, $params, $name ) = @_;
+
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+    my $res = $self->submit_form(%$params);
+
+    if ( not $res ) {
+        fail $name;
+        return;
+    }
+
+    $self->status_is( 400, $name )
+      or return;
+
+    return $res;
 }
 
 1;

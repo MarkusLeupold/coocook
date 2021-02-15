@@ -182,11 +182,10 @@ sub settings : GET HEAD Chained('submenu') PathPart('settings') Args(0)
     my ( $self, $c ) = @_;
 
     $c->stash(
-        update_url            => $c->project_uri('/project/update'),
-        rename_url            => $c->project_uri('/project/rename'),
-        visibility_url        => $c->project_uri('/project/visibility'),
-        delete_url            => $c->project_uri('/project/delete'),
-        deletion_confirmation => $c->config->{project_deletion_confirmation},
+        update_url     => $c->project_uri('/project/update'),
+        rename_url     => $c->project_uri('/project/rename'),
+        visibility_url => $c->project_uri('/project/visibility'),
+        delete_url     => $c->project_uri('/project/delete'),
     );
 }
 
@@ -276,8 +275,8 @@ sub create : POST Chained('/base') PathPart('project/create') Args(0)
             name           => $c->req->params->get('name'),
             description    => '',
             owner_id       => $c->user->id,
-            is_public      => $is_public,
-            projects_users => [                               # relationship automatically triggers transaction
+            is_public      => $projects->format_bool($is_public),
+            projects_users => [    # relationship automatically triggers transaction
                 {
                     user_id => $c->user->id,
                     role    => 'owner',
@@ -336,7 +335,8 @@ sub rename : POST Chained('base') Args(0) RequiresCapability('rename_project') {
 sub visibility : POST Chained('base') Args(0) RequiresCapability('edit_project_visibility') {
     my ( $self, $c ) = @_;
 
-    $c->project->update( { is_public => !!$c->req->params->get('public') } );
+    $c->project->update(
+        { is_public => $c->project->format_bool( !!$c->req->params->get('public') ) } );
 
     $c->response->redirect( $c->project_uri('/project/settings') );
 }
@@ -344,11 +344,18 @@ sub visibility : POST Chained('base') Args(0) RequiresCapability('edit_project_v
 sub delete : POST Chained('base') Args(0) RequiresCapability('delete_project') {
     my ( $self, $c ) = @_;
 
-    if ( $c->req->params->get('confirmation') eq $c->config->{project_deletion_confirmation} ) {
-        $c->project->delete;
+    if ( $c->req->params->get('confirmation') eq $c->project->name ) {
+        $c->project->txn_do(
+            sub {
+                $c->model('DB')->schema->pgsql_set_constraints_deferred();
+                $c->project->delete;
+            }
+        );
+        $c->messages->info( sprintf "Project '%s' has been deleted.", $c->project->name );
         $c->response->redirect( $c->uri_for_action('/index') );
     }
     else {
+        $c->messages->warn("Project is not deleted without confirmation!");
         $c->response->redirect( $c->project_uri('/project/settings') );
     }
 }

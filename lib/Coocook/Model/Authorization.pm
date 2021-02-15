@@ -25,11 +25,11 @@ my @rules = (
         grants_capabilities => [
             qw<
               view_dashboard create_project
-              view_account_settings change_display_name change_password
+              view_account_settings change_display_name change_password change_email
               view_user_organizations create_organization
               view_user_projects
               logout
-              >
+            >
         ],
     },
     {
@@ -76,7 +76,7 @@ my @rules = (
             return unless grep { $role eq $_ } organization_roles();
 
             # is already organization member
-            return if $organization->organizations_users->results_exist( { user => $user_object->id } );
+            return if $organization->organizations_users->results_exist( { user_id => $user_object->id } );
 
             return (
                      $user->has_any_organization_role( $organization, qw< admin owner > )
@@ -204,7 +204,7 @@ my @rules = (
               view_project_settings
               update_project rename_project delete_project
               archive_project unarchive_project
-              >
+            >
         ],
     },
     {
@@ -220,7 +220,7 @@ my @rules = (
               : $capability eq 'add_user_permission'         ? $_->{user_object}->projects_users
               :                                                die "code broken";
 
-            return if $permissions->results_exist( { project => $project->id } );    # already has permission
+            return if $permissions->results_exist( { project_id => $project->id } );    # already has permission
 
             return (
                      $user->has_any_role('site_owner')
@@ -262,7 +262,7 @@ my @rules = (
             qw<
               edit_organization_permission revoke_organization_permission
               edit_user_permission  revoke_user_permission
-              >
+            >
         ],
     },
     {

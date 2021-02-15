@@ -70,9 +70,6 @@ sub auto : Private {
 
     if ( $c->action ne 'user/register' and $c->action ne 'user/post_register' ) {    # don't loop
         if ( !$c->user and !$c->model('DB::User')->results_exist ) {
-            $c->messages->info( "There are currently no users registered at this Coocook installation."
-                  . " The first user you register will be site admin!" );
-
             $c->redirect_detach( $c->uri_for_action('/user/register') );
         }
     }
@@ -82,7 +79,8 @@ sub auto : Private {
           qw<
           date_format_short
           date_format_long
-          footer_html
+          datetime_format_short
+          datetime_format_long
           help_links
           icon_type
           icon_url
@@ -92,7 +90,7 @@ sub auto : Private {
 
     $c->stash(
         css => [
-            '/lib/bootstrap-4.4.1-dist/css/bootstrap' . ( $c->debug ? '.css' : 'min.css' ),
+            '/lib/bootstrap-4.4.1-dist/css/bootstrap' . ( $c->debug ? '.css' : '.min.css' ),
             '/css/local_bootstrap_modifications.css',
             '/css/material-design-icons.css',
             '/css/style.css',
@@ -175,6 +173,21 @@ sub auto : Private {
 sub index : GET HEAD Chained('/base') PathPart('') Args(0) Public {
     my ( $self, $c ) = @_;
 
+    # always read--recipes might be defined in DB although pick=0
+    my @recipes_of_the_day =
+      $c->model('DB::RecipeOfTheDay')->today( pick => $c->config->{pick_recipes_of_the_day} );
+
+    for (@recipes_of_the_day) {
+        my $recipe = $_->recipe;
+
+        $_ = $_->as_hashref(
+            recipe => $recipe,
+            url    => $c->uri_for_action( '/browse/recipe/show', [ $recipe->id, $recipe->url_name ] ),
+        );
+    }
+
+    $c->stash( recipes_of_the_day => \@recipes_of_the_day );
+
     $c->detach( $c->has_capability('view_dashboard') ? 'dashboard' : 'homepage' );
 }
 
@@ -205,7 +218,6 @@ sub homepage : Private {
     $c->stash(
         meta_description       => $c->config->{homepage_meta_description},
         meta_keywords          => $c->config->{homepage_meta_keywords},
-        homepage_text_md       => $c->config->{homepage_text_md},
         max_recipes            => $max_recipes,
         public_recipes         => \@public_recipes,
         active_public_projects => \@active_public_projects,
@@ -254,10 +266,8 @@ sub statistics : GET HEAD Chained('/base') Args(0) Public {
 sub about : GET HEAD Chained('/base') Args(0) Public {
     my ( $self, $c ) = @_;
 
-    $c->stash(
-        title         => $c->config->{about_page_title},
-        about_page_md => $c->config->{about_page_md},
-    );
+    # configured globally (instead of in TT) for menu item
+    $c->stash( title => $c->config->{about_page_title} );
 }
 
 =head2 end

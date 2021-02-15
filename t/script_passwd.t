@@ -1,10 +1,7 @@
-use strict;
-use warnings;
+use lib 't/lib';
 
-use FindBin '$Bin';
-use lib "$Bin/lib";
 use TestDB;
-
+use Test::Coocook;    # makes Coocook::Script::Passwd not read real config files
 use Test::Most tests => 5;
 
 our $USER = $ENV{USER} ||= 'coocook_test_user';

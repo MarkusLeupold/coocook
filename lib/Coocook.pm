@@ -44,7 +44,7 @@ use Catalyst (
       Session::State::Cookie
       Authentication
       Static::Simple
-      >,
+    >,
     ( mod_installed 'Catalyst::Plugin::StackTrace' ? 'StackTrace' : () ),
 );
 
@@ -57,7 +57,7 @@ if ( $ENV{CATALYST_DEBUG} ) {    # Coocook->debug() doesn't work here, always re
         with 'CatalystX::LeakChecker';
     }
 
-    # print e-mails on STDOUT in debugging mode
+    # print emails on STDOUT in debugging mode
     $ENV{EMAIL_SENDER_TRANSPORT} //= 'Print';
 }
 
@@ -83,29 +83,14 @@ __PACKAGE__->config(
     # https://en.wikipedia.org/w/index.php?title=Calendar_date&oldid=799176855
     date_format_long => '%A, %{day} %B %Y',    # Monday, 31 December 2001
 
+    datetime_format_short => '%{day} %b %Y %H:%M:%S',        # 31 Dec 2001 12:34:56
+    datetime_format_long  => '%A, %{day} %B %Y %H:%M:%S',    # Monday, 31 December 2001 12:34:56
+
     new_user_default_roles => [
-        'private_projects',                    # disable to prohibit new users creating private projects
+        'private_projects',    # disable to prohibit new users creating private projects
     ],
 
-    homepage_text_md => do {    # Markdown text for homepage, default: abstract of Coocook.pm
-        open my $fh, '<', __FILE__;    # read abstract from this file
-        my $abstract;
-        while (<$fh>) {
-            /^# ?ABSTRACT: (.+)$/ or next;
-            $abstract = $1;
-            last;
-        }
-        close $fh;
-        $abstract;
-    },
-
     about_page_title => "About",
-
-    about_page_md => <<EOT,
-This is an instance of the Coocook food planning software.
-
-<!-- define 'about_page_md' in 'coocook_local' config file to replace this text -->
-EOT
 
     # TODO move to local config of Coocook.org once 3rd party instances exist
     help_links => [
@@ -159,10 +144,8 @@ EOT
         return $c->config->{name} . " " . $c->uri_for_action('/index');
     },
 
-    # send e-mails to site_owners about new users registered
+    # send emails to site_owners about new users registered
     notify_site_owners_about_registrations => 1,
-
-    project_deletion_confirmation => "I really want to loose my project",
 
     # Disable deprecated behavior needed by old applications
     disable_component_resolution_regex_fallback => 1,
@@ -187,10 +170,11 @@ EOT
                 password_type  => 'self_check',
             },
             store => {
-                class         => 'DBIx::Class',
-                user_model    => 'DB::User',
-                role_relation => 'roles_users',
-                role_field    => 'role',
+                class            => 'DBIx::Class',
+                user_model       => 'DB::User',
+                role_relation    => 'roles_users',
+                role_field       => 'role',
+                store_user_class => 'Coocook::Authentication::Store::DBIx::Class::User',    # custom implementation
             },
         }
     },
@@ -209,13 +193,17 @@ EOT
     default_view => 'HTML',
 
     'View::Email::TT' => {
-        INCLUDE_PATH => __PACKAGE__->path_to(qw< root email_templates >),
+        INCLUDE_PATH => [
+            __PACKAGE__->path_to(qw< root email_templates >),
+            __PACKAGE__->path_to(qw< root common_templates >),
+        ],
     },
 
     'View::HTML' => {
         INCLUDE_PATH => [
             __PACKAGE__->path_to(qw< root custom_templates >),    # allow overriding with custom files
             __PACKAGE__->path_to(qw< root templates >),
+            __PACKAGE__->path_to(qw< root common_templates >),
         ],
     },
 );

@@ -10,12 +10,12 @@ extends 'Coocook::Schema::Result';
 __PACKAGE__->table('recipes');
 
 __PACKAGE__->add_columns(
-    id          => { data_type => 'int', is_auto_increment => 1 },
-    project_id  => { data_type => 'int' },
+    id          => { data_type => 'integer', is_auto_increment => 1 },
+    project_id  => { data_type => 'integer' },
     name        => { data_type => 'text' },
     preparation => { data_type => 'text' },
     description => { data_type => 'text' },
-    servings    => { data_type => 'int' },
+    servings    => { data_type => 'integer' },
 );
 
 __PACKAGE__->set_primary_key('id');
@@ -48,6 +48,11 @@ __PACKAGE__->has_many(
         cascade_copy => 1,            # see above
         order_by     => 'position',
     }
+);
+
+__PACKAGE__->has_many(
+    recipe_of_the_day => 'Coocook::Schema::Result::RecipeOfTheDay',
+    'recipe_id'
 );
 
 __PACKAGE__->has_many( recipes_tags => 'Coocook::Schema::Result::RecipeTag', 'recipe_id' );

@@ -1,13 +1,8 @@
-use strict;
-use warnings;
-
-use Coocook::Script::Deploy;
-use Coocook::Schema;
-use DBICx::TestDatabase;
-use Test::Most;
-
 use lib 't/lib/';
-use TestDB;
+
+use Coocook::Schema;
+use TestDB qw(install_ok upgrade_ok);
+use Test::Most;
 
 # first upgrade scripts created columns in different order
 # or had other subtle differences to a fresh deployment
@@ -26,23 +21,31 @@ plan tests => 1 + 3 * ( $Coocook::Schema::VERSION - 1 ) + 2;
 
 my $schema_from_code = TestDB->new();
 my $schema_from_deploy;
-my $schema_from_upgrades = DBICx::TestDatabase->new( 'Coocook::Schema', { nodeploy => 1 } );
+my $schema_from_upgrades = TestDB->new( deploy => 0 );
 
 install_ok( $schema_from_upgrades, 1 );
 
+# generated upgrade scripts contain
+# CREATE TEMPORARY TABLE ... with FKs on main tables which is impossible
+# http://sqlite.1065341.n5.nabble.com/Foreign-keys-amp-TEMPORARY-tables-td92306.html
+diag "TODO disabling PRAGMA foreign_keys on DB from upgrade SQLs";
+$schema_from_upgrades->disable_fk_checks();
+
 for my $version ( 2 .. $Coocook::Schema::VERSION ) {
-    $schema_from_deploy = DBICx::TestDatabase->new( 'Coocook::Schema', { nodeploy => 1 } );
+    $schema_from_deploy = TestDB->new( deploy => 0 );
     install_ok( $schema_from_deploy, $version );
 
     upgrade_ok( $schema_from_upgrades, $version );
 
-    $SCHEMA_VERSIONS_WITH_DIFFERENCES{$version}
-      and local $TODO = "Upgrade SQL files are known to be broken";
+  SKIP: {
+        $SCHEMA_VERSIONS_WITH_DIFFERENCES{$version}
+          and skip "Upgrade SQL files are known to be broken", 1;
 
-    schema_eq(
-        $schema_from_upgrades => $schema_from_deploy,
-        "schema version $version from upgrade SQLs and schema from deploy SQL are equal"
-    );
+        schema_eq(
+            $schema_from_upgrades => $schema_from_deploy,
+            "schema version $version from upgrade SQLs and schema from deploy SQL are equal"
+        );
+    }
 }
 
 schema_eq(
@@ -54,32 +57,6 @@ schema_eq(
     $schema_from_upgrades => $schema_from_code,
     "schema from upgrade SQLs and schema from Coocook::Schema code are equal"
 );
-
-sub install_ok {
-    my ( $schema, $version, $name ) = @_;
-
-    my $dh = Coocook::Script::Deploy->new( _schema => $schema )->_dh;
-
-    local $Test::Builder::Level = $Test::Builder::Level + 1;
-
-    $version
-      and local *DBIx::Class::DeploymentHandler::to_version = sub { $version };
-
-    ok $dh->install(), $name || "install version " . $dh->to_version;
-}
-
-sub upgrade_ok {
-    my ( $schema, $version, $name ) = @_;
-
-    my $dh = Coocook::Script::Deploy->new( _schema => $schema )->_dh;
-
-    local $Test::Builder::Level = $Test::Builder::Level + 1;
-
-    $version
-      and local *DBIx::Class::DeploymentHandler::to_version = sub { $version };
-
-    ok $dh->upgrade(), $name || "upgrade to version " . $dh->to_version;
-}
 
 sub schema_eq {
     my ( $schema1, $schema2, $test_name ) = @_;

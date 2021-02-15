@@ -1,9 +1,5 @@
-use strict;
-use warnings;
-
 use lib 't/lib';
 
-use TestDB;
 use Test::Coocook;
 use Test::Most;
 

@@ -165,16 +165,7 @@ END %]
                         <li><a href="[% projects_url %]">Projects</a></li>
                     </ul>
                 </div>
-[% IF project_urls %]
-                <div class="col-md">
-                    <h3><span class="tiny">Project Parameters</span></h3>
-                    <ul class="list-unstyled small">
-                        <li><a href="[% project_urls.units %]">Units & Quantities</a></li>
-                        <li><a href="[% project_urls.tags %]">Tags</a></li>
-                        <li><a href="[% project_urls.shop_sections %]">Shop Sections</a></li>
-                    </ul>
-                </div>
-[% END %]
+
                 <div class="col-md">
                     <h3><span class="tiny">Get Help</span></h3>
                     <ul class="list-unstyled small">
@@ -213,7 +204,7 @@ END %]
                     </ul>
 
                 </div>
-
+            </div>
         </div>
     </footer>
 
@@ -221,7 +212,7 @@ END %]
     <script src="[% path %]"></script>
 [% END %]
 
-[% footer_html %]
+[% INCLUDE 'wrapper_footer.tt' %]
 
 </div>
 </body>

@@ -1,6 +1,8 @@
 package Coocook::Schema::ResultSet::User;
 
-use DateTime;
+use feature 'fc';
+
+use Data::Validate::Email 'is_email';
 use Moose;
 use MooseX::MarkAsMethods autoclean => 1;
 
@@ -11,6 +13,58 @@ __PACKAGE__->load_components('+Coocook::Schema::Component::ResultSet::SortByName
 __PACKAGE__->meta->make_immutable;
 
 sub sorted_by_columns { 'name_fc' }
+
+=head1 CHECK METHODS
+
+=cut
+
+sub email_valid_and_available {
+    my ( $self, $email ) = @_;
+
+    my $blacklist = $self->result_source->schema->resultset('BlacklistEmail');
+
+    is_email($email)
+      or return;
+
+    $blacklist->is_email_ok($email)
+      or return;
+
+    return !$self->results_exist(
+        [    # OR
+            email_fc => fc $email,
+            {    # AND
+                new_email_fc  => fc $email,
+                token_expires => { '>' => $self->format_datetime_now },
+            },
+        ],
+    );
+}
+
+sub name_available {
+    my ( $self, $name ) = @_;
+
+    my $name_fc = fc $name;
+
+    my $blacklist     = $self->result_source->schema->resultset('BlacklistUsername');
+    my $organizations = $self->result_source->schema->resultset('Organization');
+
+    return (  !$self->results_exist( { name_fc => $name_fc } )
+          and !$organizations->results_exist( { name_fc => $name_fc } )
+          and $blacklist->is_username_ok($name) );
+}
+
+sub name_valid {
+    my ( $self, $name ) = @_;
+
+    defined($name)
+      or return;
+
+    return $name =~ m/ \A [0-9a-zA-Z_]+ \Z /x;
+}
+
+=head1 SUBSET METHODS
+
+=cut
 
 sub site_owners {
     my $self = shift;
@@ -24,6 +78,10 @@ sub site_owners {
         }
     );
 }
+
+=head1 WITH EXTRA COLUMNS
+
+=cut
 
 sub with_projects_count {
     my $self = shift;
@@ -45,7 +103,7 @@ sub with_valid_limited_token {
         {
             $self->me('token_expires') => {    # AND
                 '!=' => undef,
-                '>'  => $self->format_datetime( DateTime->now ),
+                '>'  => $self->format_datetime_now,
             }
         }
     );
@@ -58,7 +116,7 @@ sub with_valid_or_unlimited_token {
         {
             $self->me('token_expires') => [    # OR
                 '=' => undef,
-                '>' => $self->format_datetime( DateTime->now )
+                '>' => $self->format_datetime_now,
             ]
         }
     );

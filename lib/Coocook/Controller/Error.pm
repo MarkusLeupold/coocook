@@ -5,6 +5,8 @@ use MooseX::MarkAsMethods autoclean => 1;
 
 BEGIN { extends 'Coocook::Controller' }
 
+our $ENABLE_INTERNAL_SERVER_ERROR_PAGE;
+
 sub bad_request : Private {
     my ( $self, $c, $error ) = @_;
 
@@ -42,9 +44,13 @@ An endpoint to receive an HTML page which can be saved and displayed as static 5
 sub internal_server_error : HEAD GET Chained('/base') Public {
     my ( $self, $c ) = @_;
 
-    # do NOT set status to 500 because this actually works
+    $ENABLE_INTERNAL_SERVER_ERROR_PAGE
+      or $c->detach( $self->action_for('not_found') );
 
-    $c->response->header( 'X-Robots-Tag' => 'noindex' );    # hide this in search engines
+    # do NOT set status to 500 because this request actually works
+
+    $c->stash->{canonical_url} = undef;    # can't have dynamic URL in static HTML file
+    $c->stash->{robots}->index(0);         # hide this in search engines
 }
 
 =head2 not_found

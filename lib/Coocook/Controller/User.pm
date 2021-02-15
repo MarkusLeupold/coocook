@@ -1,11 +1,12 @@
 package Coocook::Controller::User;
 
+use feature 'fc';
+use utf8;
+
 use Data::Validate::Email 'is_email';
 use DateTime;
 use Moose;
 use MooseX::MarkAsMethods autoclean => 1;
-
-use feature 'fc';
 
 BEGIN { extends 'Coocook::Controller' }
 
@@ -75,7 +76,18 @@ sub register : GET HEAD Chained('/base') Args(0) Does('~HasCSS') Does('~HasJS') 
     $c->user_registration_enabled
       or $c->detach('/error/forbidden');
 
-    $c->session( register_form_served_epoch => time() );
+    if ( not $c->model('DB::User')->results_exist ) {
+        $c->messages->info( "There are currently no users registered at this Coocook installation."
+              . " The first user you register will be site admin!" );
+
+        $c->stash->{robots}->index(0);
+    }
+
+    # set register_form_served_epoch, except we're already in the progress and already have a timestamp
+    for ( \$c->session->{register_form_served_epoch} ) {
+        if ( $c->stash->{last_input} ) { $$_ ||= time }
+        else                           { $$_ = time }
+    }
 
     push @{ $c->stash->{js} }, '/lib/zxcvbn.js';
 
@@ -103,19 +115,16 @@ sub post_register : POST Chained('/base') PathPart('register') Args(0) Public {
 
     my @errors;
 
+    my $users = $c->model('DB::User');
+
     if ( length $username == 0 ) {
         push @errors, "username must not be empty";
     }
-    elsif ( $username !~ m/ \A [0-9a-zA-Z_]+ \Z /x ) {
+    elsif ( not $users->name_valid($username) ) {
         push @errors, "username must not contain other characters than 0-9, a-z, A-Z or _.";
     }
-    else {
-        my $name_fc = fc($username);
-
-        !$c->model('DB::Organization')->results_exist( { name_fc => $name_fc } )
-          and !$c->model('DB::User')->results_exist( { name_fc => $name_fc } )
-          and $c->model('DB::BlacklistUsername')->is_username_ok($username)
-          or push @errors, "username is not available";
+    elsif ( not $users->name_available($username) ) {
+        push @errors, "username is not available";
     }
 
     if ( length $password == 0 ) {
@@ -123,14 +132,12 @@ sub post_register : POST Chained('/base') PathPart('register') Args(0) Public {
     }
     else {
         if ( $password ne $c->req->params->get('password2') ) {
-            push @errors, "password's don't match";
+            push @errors, "passwords don’t match";
         }
     }
 
-    is_email($email_fc)
-      and !$c->model('DB::User')->results_exist( { email_fc => $email_fc } )
-      and $c->model('DB::BlacklistEmail')->is_email_ok($email_fc)
-      or push @errors, "e-mail address is invalid or already taken";
+    $c->model('DB::User')->email_valid_and_available($email_fc)
+      or push @errors, "email address is invalid or already taken";
 
     my $terms = $c->model('DB::Terms')->valid_today;
 
@@ -198,13 +205,13 @@ sub post_register : POST Chained('/base') PathPart('register') Args(0) Public {
     $password = 'x' x length $password;
     undef $password;
 
-    $c->visit( '/email/verification', [ $user, $token ] );
+    $c->visit( '/email/verify', [ $user, $token ] );
 
     $terms
       and $user->create_related(
         terms_users => {
-            terms    => $terms->id,
-            approved => $terms->format_datetime( DateTime->now ),
+            terms_id => $terms->id,
+            approved => $terms->format_datetime_now,
         }
       );
 
@@ -223,8 +230,8 @@ sub post_register : POST Chained('/base') PathPart('register') Args(0) Public {
 
     $user->add_roles( \@roles );
 
-    $c->messages->info( "You should receive an e-mail with a web link."
-          . " Please click that link to verify your e-mail address." );
+    $c->messages->info( "You should receive an email with a web link."
+          . " Please click that link to verify your email address." );
 
     $c->redirect_detach( $c->uri_for('/') );
 }
@@ -244,13 +251,24 @@ sub post_recover : POST Chained('/base') PathPart('recover') Args(0) Public {
     my $email_fc = fc $c->req->params->get('email');
 
     if ( not is_email($email_fc) ) {
-        $c->messages->error("Enter a valid e-mail address");
+        $c->messages->error("Enter a valid email address");
 
         $c->redirect_detach( $c->uri_for( $self->action_for('recover') ) );
     }
 
     if ( my $user = $c->model('DB::User')->find( { email_fc => $email_fc } ) ) {
-        $c->visit( '/email/recovery_link', [$user] );
+        my $token   = $c->model('Token')->new();
+        my $expires = DateTime->now->add( days => 1 );
+
+        $user->update(
+            {
+                token_hash    => $token->to_salted_hash,
+                token_expires => $user->format_datetime($expires),
+                new_email_fc  => undef,                              # cancel email change, if in process
+            }
+        );
+
+        $c->visit( '/email/recovery_link', [ $user, $token ] );
     }
     else {
         $c->visit( '/email/recovery_unregistered', [$email_fc] );
@@ -283,19 +301,25 @@ sub post_reset_password : POST Chained('base') PathPart('reset_password') Args(1
     my $user = $c->stash->{user_object};
 
     # for rationale see reset_password()
-    ( $user->token_expires and $user->check_base64_token($base64_token) )
-      or die;
+    if ( not( $user->token_expires and $user->check_base64_token($base64_token) ) ) {
+        $c->messages->error("Your password reset link is invalid or expired!");
+        $c->detach('/error/bad_request');
+    }
 
     my $new_password = $c->req->params->get('password');
 
-    $c->req->params->get('password2') eq $new_password
-      or die "new passwords don't match";    # TODO error handling
+    if ( $c->req->params->get('password2') ne $new_password ) {
+        $c->messages->error("New passwords don’t match!");
+        $c->redirect_detach(
+            $c->uri_for( $self->action_for('reset_password'), [ $user->name, $base64_token ] ) );
+    }
 
     $user->set_columns(
         {
             password      => $new_password,
             token_hash    => undef,
             token_expires => undef,
+            token_created => undef,
         }
     );
 
@@ -305,6 +329,8 @@ sub post_reset_password : POST Chained('base') PathPart('reset_password') Args(1
     $user->update();
 
     $c->visit( '/email/password_changed', [$user] );
+
+    $c->messages->info("Your password has been changed.");
 
     # no point in letting user log in again
     # https://security.stackexchange.com/q/64828/91275
@@ -319,12 +345,14 @@ sub verify : GET HEAD Chained('base') PathPart('verify') Args(1) Public {
     my $user = $c->stash->{user_object};
 
     if ( !$user->email_verified ) {
+
+        # TODO better error message when user requested new password and then clicked link
         $user->check_base64_token($base64_token)
-          or die;    # TODO error handling
+          or $c->detach('/error/bad_request');
 
         $user->update(
             {
-                email_verified => $user->format_datetime( DateTime->now ),
+                email_verified => $user->format_datetime_now,
                 token_hash     => undef,
                 token_expires  => undef,
             }

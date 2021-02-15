@@ -12,17 +12,23 @@ extends 'Coocook::Schema::Result';
 __PACKAGE__->table('users');
 
 __PACKAGE__->add_columns(
-    id             => { data_type => 'int', is_auto_increment => 1 },
+    id             => { data_type => 'integer', is_auto_increment => 1 },
     name           => { data_type => 'text' },
-    name_fc        => { data_type => 'text' },                          # fold cased
+    name_fc        => { data_type => 'text' },                              # fold cased
     password_hash  => { data_type => 'text' },
     display_name   => { data_type => 'text' },
     admin_comment  => { data_type => 'text', default_value => '' },
     email_fc       => { data_type => 'text' },
-    email_verified => { data_type => 'datetime', is_nullable => 1 },
-    token_hash     => { data_type => 'text',     is_nullable => 1 },
-    token_expires  => { data_type => 'datetime', is_nullable => 1 },
-    created => { data_type => 'datetime', default_value => \'CURRENT_TIMESTAMP', set_on_create => 1 },
+    new_email_fc   => { data_type => 'text',                        is_nullable => 1 },
+    email_verified => { data_type => 'timestamp without time zone', is_nullable => 1 },
+    token_hash     => { data_type => 'text',                        is_nullable => 1 },
+    token_created  => { data_type => 'timestamp without time zone', is_nullable => 1 },
+    token_expires  => { data_type => 'timestamp without time zone', is_nullable => 1 },
+    created        => {
+        data_type     => 'timestamp without time zone',
+        default_value => \'CURRENT_TIMESTAMP',
+        set_on_create => 1,
+    },
 );
 
 __PACKAGE__->set_primary_key('id');
@@ -66,11 +72,28 @@ around [ 'set_column', 'store_column' ] => sub {
 
         ( $column => $value ) = ( password_hash => $password->to_salted_hash );
     }
+    elsif ( $column eq 'token_hash' ) {
+        if ( defined $value ) {          # automatically set 'token_created' when 'token_hash' is set
+            $self->$orig( token_created => $self->format_datetime_now );
+        }
+        else {                           # reset when 'token_hash' is unset
+            $self->$orig( token_created => undef );
+            $self->$orig( token_expires => undef );
+        }
+    }
 
     return $self->$orig( $column => $value );
 };
 
 __PACKAGE__->meta->make_immutable;
+
+sub alternative_email_valid_and_available {
+    my $self = shift;
+
+    my $other_users = $self->result_source->resultset->search( { id => { '!=' => $self->id } } );
+
+    return $other_users->email_valid_and_available(@_);
+}
 
 sub blacklist {
     my $self = shift;
@@ -92,6 +115,9 @@ sub check_password {    # method name defined by Catalyst::Authentication::Crede
 
 sub check_base64_token {
     my ( $self, $token ) = @_;
+
+    $self->token_hash
+      or return;
 
     if ( my $expires = $self->token_expires ) {
         $expires > DateTime->now
@@ -164,7 +190,7 @@ sub status {
         return ok => "ok";
     }
 
-    return unverified => "e-mail address not yet verified with verification link";
+    return unverified => "email address not yet verified with verification link";
 }
 
 1;

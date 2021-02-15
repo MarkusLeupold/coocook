@@ -1,14 +1,10 @@
-use strict;
-use warnings;
-
 use lib 't/lib';
 
-use DBICx::TestDatabase;
 use Test::Coocook;
-use Test::Most tests => 75;
+use Test::Most tests => 88;
 use Time::HiRes 'time';
 
-my $t = Test::Coocook->new( deploy => 0 );
+my $t = Test::Coocook->new( test_data => 0 );
 
 my $schema = $t->schema;
 
@@ -18,16 +14,27 @@ $schema->resultset('BlacklistEmail')
 $schema->resultset('BlacklistUsername')
   ->add_username( my $blacklist_username = 'blacklisted', comment => __FILE__ );
 
-my $organization = $schema->resultset('Organization')->create(
-    {
-        name           => "TestOrganization",
-        display_name   => "Test Organization",
-        description_md => __FILE__,
-        owner_id       => 9999
+# normally an organization needs an owner
+# but then we couldn't test all the error cases in one block ...
+# so we trick a little
+my $organization = $schema->fk_checks_off_do(
+    sub {
+        return $schema->resultset('Organization')->create(
+            {
+                name           => "TestOrganization",
+                display_name   => "Test Organization",
+                description_md => __FILE__,
+                owner_id       => 9999,
+            }
+        );
     }
 );
 
 $t->get_ok('/');
+
+$t->text_contains("first user");
+
+$t->robots_flags_ok( { index => 0 } );
 
 {
     my %userdata_ok = (
@@ -37,19 +44,26 @@ $t->get_ok('/');
         password2 => 's3cr3t',
     );
 
-    $t->register_fails_like( { %userdata_ok, password2 => 'something-else' }, qr/match/ );
+    $t->register_fails_like( { %userdata_ok, password2 => 'something-else' },
+        qr/match/, "two different passwords" );
 
-    $t->register_fails_like( { %userdata_ok, email => $blacklist_email },
-        qr/e-mail address is invalid or already taken/ );
+    $t->register_fails_like(
+        { %userdata_ok, email => $blacklist_email },
+        qr/email address is invalid or already taken/,
+        "blacklisted email"
+    );
 
     $t->register_fails_like(
         { %userdata_ok, email => uc $blacklist_email },
-        qr/e-mail address is invalid or already taken/,
-        "blacklisted e-mail in uppercase"
+        qr/email address is invalid or already taken/,
+        "blacklisted email in uppercase"
     );
 
-    $t->register_fails_like( { %userdata_ok, username => $blacklist_username },
-        qr/username is not available/ );
+    $t->register_fails_like(
+        { %userdata_ok, username => $blacklist_username },
+        qr/username is not available/,
+        "blacklisted username"
+    );
 
     $t->register_fails_like(
         { %userdata_ok, username => uc $blacklist_username },
@@ -70,31 +84,83 @@ $t->get_ok('/');
     );
 
     $t->register_ok( \%userdata_ok );
-}
+    $t->email_count_is(1);
 
-for my $user1 ( $schema->resultset('User')->find( { name => 'test' } ) ) {
+    my $user1 = $schema->resultset('User')->find( { name => 'test' } );
+
+    ok $user1->get_column($_), "column '$_' is set" for 'token_created';
+    is $user1->get_column($_) => undef, "column '$_' is NULL" for 'token_expires';
+
     ok $user1->has_any_role('site_owner'),       "1st user created has 'site_owner' role";
     ok $user1->has_any_role('private_projects'), "1st user created has 'private_projects' role";
+
+    $t->text_lacks( 'Sign up', "registration is not enabled by default" );
+
+    $t->reload_config( enable_user_registration => 1 );
+    $t->get('/');
+
+    $t->register_fails_like( \%userdata_ok, qr/username is not available/, "existing username" );
+
+    $t->register_fails_like(
+        { %userdata_ok, username => 'TEST' },
+        qr/username is not available/,
+        "existing username in uppercase"
+    );
+
+    $userdata_ok{username} = 'new_user';
+
+    $t->register_fails_like(
+        \%userdata_ok,
+        qr/email address is invalid or already taken/,
+        "existing email address"
+    );
+
+    $t->register_fails_like(
+        { %userdata_ok, email => uc $userdata_ok{email} },
+        qr/email address is invalid or already taken/,
+        "existing email address"
+    );
+
+    $userdata_ok{email} = 'new_user@example.com';
+
+    $t->schema->txn_begin();
+    $user1->update(
+        {
+            new_email_fc  => $userdata_ok{email},
+            token_expires => $user1->format_datetime( DateTime->now->add( hours => 12 ) )
+        }
+    );
+
+    $t->register_fails_like(
+        \%userdata_ok,
+        qr/email address is invalid or already taken/,
+        "email address that existing user wants to change to"
+    );
+
+    note "email change of existing user expires ...";
+    $user1->update( { token_expires => $user1->format_datetime_now } );
+
+    $t->register_ok( \%userdata_ok );
+    $t->email_count_is(3);
+
+    $t->schema->txn_rollback();
 }
 
-subtest "verify e-mail address" => sub {
-    $t->verify_email_ok();
+subtest "verify email address" => sub {
+    $t->get_ok_email_link_like( qr/verify/, "verify email address" );
+
+    # TODO is GET on the link enough? maybe email clients or "security" software will fetch it?
+    # - there is no point in requesting the password first
+    #   because user needs to be able reset the password via e-mail
+    # - maybe display a page with a POST button first?
+    # - but every website I know does it with a simple GET
 
     $t->title_like( qr/sign in/i, "got redirected to login page" );
 
-    # TODO replace evil HTML "parser" hackery by reasonable HTML parser
-    $t->content_like( qr/ <input [^<>]+ name="username" [^<>]+ value="test" /x,
-        "username is prefilled in login form" )
-      or note $t->uri, $t->content;
+    $t->input_has_value( username => 'test', "username is prefilled in login form" );
 };
 
 $t->clear_emails();
-
-$t->content_lacks('Sign up');
-
-$t->reload_config( enable_user_registration => 1 );
-
-$t->get('/');
 
 $t->register_ok(
     {
@@ -105,15 +171,16 @@ $t->register_ok(
     }
 );
 
-# TODO Test::Cooocook warns that 2 e-mails are stored but that is correct
+$t->email_count_is(2);
+
 $t->email_like(qr/Hi test2/);
 $t->email_like(qr/Please verify/);
 $t->shift_emails();
 
 $t->email_like(qr/Hi test\b/);
-$t->email_like(qr/somebody registered/);
+$t->email_like(qr/somebody registered/i);
 $t->email_like(qr/test2/);
-$t->email_like(qr/example\.com/);      # contains domain part of e-mail address
+$t->email_like(qr/example\.com/);      # contains domain part of email address
 $t->email_unlike(qr/test2.+example.+com/);
 $t->email_like(qr{ /user/test2 }x);    # URLs to user info pages
 $t->email_like(qr{ /admin/user/test2 }x);
@@ -123,24 +190,6 @@ for my $user2 ( $schema->resultset('User')->find( { name => 'test2' } ) ) {
     ok !$user2->has_any_role('site_owner'), "2nd user created hasn't 'site_owner' role";
     ok $user2->has_any_role('private_projects'), "2nd user created has 'private_projects' role";
 }
-
-$t->register_fails_like(
-    { username => 'new_user', email => 'TEST2@example.com' },
-    qr/e-mail address is invalid or already taken/,
-    "registration of existing e-mail address (in uppercase) fails"
-);
-
-$t->register_fails_like(
-    { username => 'TEST2' },
-    qr/username is not available/,
-    "registration of existing username (in uppercase) fails"
-);
-
-$t->register_fails_like(
-    { username => 'foobar ' },    # note space char
-    qr/username must not contain/,
-    "registration with invalid existing username fails"
-);
 
 $t->login_fails( 'test', 'invalid' );    # wrong password
 
@@ -154,13 +203,20 @@ $t->login_fails( 'test2', 's3cr3t' );    # not verified
     cmp_ok $t2 - $t1, '>', 1, "login request took more than 1 second";
 }
 
-$t->change_password_ok(
+$t->follow_link_ok( { text => 'settings Settings' } );
+
+$t->submit_form_ok(
     {
-        old_password  => 's3cr3t',
-        new_password  => 'P@ssw0rd',
-        new_password2 => 'P@ssw0rd',
+        with_fields => {
+            current_password => 's3cr3t',
+            new_password     => 'P@ssw0rd',
+            new_password2    => 'P@ssw0rd',
+        },
     },
+    "submit change password form"
 );
+
+$t->text_contains('Your password has been changed');
 
 $t->email_like(qr/ password .+ changed /x);
 
@@ -170,25 +226,23 @@ $t->change_display_name_ok('John Doe');
 
 $t->logout_ok();
 
+$t->text_contains('logged out');
+
 $t->get_ok('/login');
 
 $t->robots_flags_ok( { index => 1, archive => 1 }, "plain /login may be indexed" );
 
-$t->content_unlike( qr/ name="username" .+ value="test" /x,
-    "... username is deleted from session cookie by logout" );
+$t->input_has_value( username => '', "... username is deleted from session cookie by logout" );
 
-$t->content_unlike( qr/ name="store_username" .+ checked /x,
-    '... checkbox "store username" is NOT checked' );
+$t->checkbox_is_off('store_username');
 
 $t->get_ok('/login?username=from_query');
 
 $t->robots_flags_ok( { index => 0, archive => 0 }, "/login with query string may NOT be indexed" );
 
-$t->content_like( qr/ name="username" .+ value="from_query" /x,
-    "... username is prefilled from URL query" );
+$t->input_has_value( username => 'from_query', "... username is prefilled from URL query" );
 
-$t->content_unlike( qr/ name="store_username" .+ checked /x,
-    '... checkbox "store username" is NOT checked' );
+$t->checkbox_is_off('store_username');
 
 is $t->cookie_jar->get_cookies( $t->base, 'username' ) => undef,
   "username is not stored in persistent cookie";
@@ -200,6 +254,7 @@ $t->logout_ok();
 {
     my $original_length = length $t->cookie_jar->as_string;
 
+    # we want to clear only that specific cookie
     $t->cookie_jar->clear( 'localhost.local', '/', 'coocook_session' )
       and note "deleted session cookie";
 
@@ -212,14 +267,13 @@ $t->get_ok('/login');
 is $t->cookie_jar->get_cookies( $t->base, 'username' ) => 'test',
   "'username' cookie contains username 'test'";
 
-$t->content_like( qr/ name="username" .+ value="test" /x,
-    "username is prefilled from persistent cookie" )
-  or diag $t->content;
+$t->input_has_value( username => 'test', "username is prefilled from persistent cookie" );
 
 $t->robots_flags_ok( { index => 0, archive => 0 },
     "/login with username from cookie may NOT be indexed" );
 
-$t->content_like( qr/ name="store_username" .+ checked /x, 'checkbox "store username" is checked' );
+$t->form_number(2);
+$t->checkbox_is_on('store_username');
 
 $t->login_ok( 'test', 'P@ssw0rd', store_username => '' );
 
@@ -233,28 +287,62 @@ subtest "expired password reset token URL" => sub {
 
     $schema->resultset('User')->update( { token_expires => '2000-01-01 00:00:00' } );
 
-    $t->get_email_link_ok(qr/http\S+reset_password\S+/);
+    $t->get_ok_email_link_like(qr/reset_password/);
 
-    $t->content_like(qr/expired/);
+    $t->text_like(qr/expired/);
+    $t->text_lacks('verified');
 
     $t->clear_emails();
 };
 
 subtest "password recovery" => sub {
-    $t->recover_account_ok( 'test@example.com', 'new, nice & shiny' );
+    my $user         = $t->schema->resultset('User')->find( { email_fc => 'test@example.com' } );
+    my $new_password = 'new, nice & shiny';
+
+    ok !$user->check_password($new_password), "password is different before";
+
+    $t->request_recovery_link_ok('test@example.com');
+
+    $t->text_contains('verified');
+
+    $t->submit_form_ok(
+        {
+            with_fields => {
+                password  => 'foo',
+                password2 => 'bar',
+            }
+        },
+        "submit two different passwords"
+    );
+
+    $t->text_like(qr/don.t match/);
+
+    $user->discard_changes();
+    ok !$user->check_password($new_password), "password hasn't been changed";
+
+    $t->submit_form_ok( { with_fields => { map { $_ => $new_password } 'password', 'password2' } },
+        "submit new password twice" );
+
+    $t->text_like(qr/ password .+ changed/x);
+
+    $user->discard_changes();
+    ok $user->check_password($new_password), "password has been changed";
 
     $t->logout_ok();
 
     $t->clear_emails();
 };
 
-subtest "password recovery marks e-mail address verified" => sub {
-    my $test2 = $schema->resultset('User')->find( { name => 'test2' } );
+subtest "password recovery marks email address verified" => sub {
+    my $test2        = $schema->resultset('User')->find( { name => 'test2' } );
+    my $new_password = 'sUpEr s3cUr3';
 
     is $test2->email_verified => undef,
       "email_verified IS NULL";
 
-    $t->recover_account_ok( 'test2@example.com', 'sUpEr s3cUr3' );
+    $t->request_recovery_link_ok('test2@example.com');
+    $t->submit_form_ok( { with_fields => { map { $_ => 'sUpEr s3cUr3' } 'password', 'password2' } },
+        "submit password reset form" );
 
     $test2->discard_changes;
     isnt $test2->email_verified => undef,
@@ -338,7 +426,7 @@ $t->create_project_ok( { name => "Test Project 2" } );
 
 $t->base_like( qr/import/, "redirected to importer" );
 
-$t->content_contains("Test Project 1");
+$t->text_contains("Test Project 1");
 
 ok my $project = $schema->resultset('Project')->find( { name => "Test Project 1" } ),
   "project is in database";

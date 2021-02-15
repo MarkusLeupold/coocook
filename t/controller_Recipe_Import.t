@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use utf8;    # German umlauts in this source file
-
 use lib 't/lib/';
 
 use Coocook::Model::ProjectImporter;
@@ -36,6 +32,7 @@ $t->text_contains("Import recipe pizza from project Test")
 
 $t->content_contains('existingRecipeNames');
 
+# JSON data in <script> element
 $t->content_contains( 'Spätzle über Bratklößchen', "Unicode characters encoded properly" )
   or note $t->content;
 

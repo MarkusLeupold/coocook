@@ -44,7 +44,7 @@ sub BUILD {
         $item->{unit}        = $units{ $item->{unit_id} };
         $item->{ingredients} = [];
 
-        push @{ $items_per_section{ $item->{article}{shop_section_id} } }, $item;
+        push @{ $items_per_section{ $item->{article}{shop_section_id} || '' } }, $item;
     }
 
     {    # add ingredients to each item
@@ -95,7 +95,7 @@ sub BUILD {
             }
         )->hri;
 
-        my %convertible_units;        # units by article, quantity
+        my %convertible_units;    # units by article, quantity
 
         while ( my $article_unit = $articles_units->next ) {
             my $article = $articles{ $article_unit->{article_id} } || die $article_unit->{article_id};

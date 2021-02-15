@@ -1,6 +1,6 @@
 package Coocook::View::Email;
 
-# ABSTRACT: create e-mails with TT templates
+# ABSTRACT: create emails with TT templates
 
 use Moose;
 use MooseX::MarkAsMethods autoclean => 1;
@@ -20,15 +20,29 @@ Catalyst View.
 before process => sub {
     my ( $self, $c ) = @_;
 
-    my $stash_key = $self->stash_key;
+    my $stash = $c->stash->{ $self->stash_key };
 
-    $c->log->info(
-        sprintf(
-            "Sending e-mail to <%s> with subject '%s'",
-            $c->stash->{$stash_key}{to},
-            $c->stash->{$stash_key}{subject},
-        )
-    );
+    # automatically set template filename based on action path
+    $stash->{template} ||= do {
+        my $action = $c->action;
+        $action =~ s!^email/!!
+          or warn "Unexpected action '$action'";
+
+        $action . '.tt';
+    };
+};
+
+around generate_message => sub {
+    my $orig = shift;
+    my $self = shift;
+    my $attr = $_[1];
+
+    # workaround for https://github.com/dboehmer/coocook/issues/139
+    # be more specific what kind of header we have
+    # https://metacpan.org/pod/release/RJBS/Email-MIME-1.949/lib/Email/MIME.pm#header
+    $attr->{header_str} = delete $attr->{header};
+
+    return $self->$orig(@_);
 };
 
 __PACKAGE__->meta->make_immutable;

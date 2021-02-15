@@ -1,6 +1,3 @@
-use strict;
-use warnings;
-
 use lib 't/lib/';
 
 use Coocook::Model::ProjectImporter;
@@ -8,7 +5,7 @@ use TestDB;
 use Test::Deep;
 use Test::Most tests => 33;
 
-my $schema = TestDB->new( { deploy => 1 } );
+my $schema = TestDB->new();
 
 my $source_project = $schema->resultset('Project')->find(1);
 my $source_recipe  = $schema->resultset('Recipe')->find(1);
@@ -74,9 +71,9 @@ my @articles = $target_project->articles->populate(
 
 my @units = $target_project->units->populate(
     [
-        [ 'quantity_id', 'space', 'short_name', 'long_name' ],         # NOT alphabetic order
-        [ $quantity->id, 1, 'xxx', 'kilograms' ],                      # same long_name
-        [ $quantity->id, 1, 'g',   'grams with a different name' ],    # same short_name
+        [ 'quantity_id', 'space', 'short_name', 'long_name' ],                      # NOT alphabetic order
+        [ $quantity->id, 1,       'xxx',        'kilograms' ],                      # same long_name
+        [ $quantity->id, 1,       'g',          'grams with a different name' ],    # same short_name
     ]
 );
 
